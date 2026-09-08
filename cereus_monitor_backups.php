@@ -164,7 +164,7 @@ $bk_dur    = isset($bk['duration_secs']) ? (int)$bk['duration_secs'] . 's' : '';
 	<code><?php print htmlspecialchars($dest_dir); ?></code>
 	&mdash;
 	<?php print __('Schedule cereus_backup.php via cron to create archives.', 'cereus_monitor'); ?>
-	<code>0 3 * * * /usr/bin/php <?php print htmlspecialchars($config['base_path']); ?>/cli/cereus_backup.php</code>
+	<code>0 3 * * * /usr/bin/php <?php print htmlspecialchars($config['base_path']); ?>/plugins/cereus_monitor/cereus_backup.php</code>
 </p>
 </td></tr>
 <?php html_end_box(); ?>

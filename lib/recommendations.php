@@ -212,11 +212,11 @@ function cereus_health_evaluate($os, $db, $cacti) {
 		if ($bk === 'failure') {
 			$findings[] = cereus_health_finding('cacti', 'critical', 'backup_failed',
 				$cacti['backup_message'] ?: 'Backup reported failure', 'success',
-				'Last RRD backup failed. Re-run: php ' . $config['base_path'] . '/cli/cereus_backup.php');
+				'Last RRD backup failed. Re-run: php ' . $config['base_path'] . '/plugins/cereus_monitor/cereus_backup.php');
 		} elseif ($bk === 'not_configured') {
 			$findings[] = cereus_health_finding('cacti', 'info', 'backup_not_configured',
 				'No backup status reported yet', 'success',
-				'Schedule: php ' . $config['base_path'] . '/cli/cereus_backup.php via cron.');
+				'Schedule: php ' . $config['base_path'] . '/plugins/cereus_monitor/cereus_backup.php via cron.');
 		}
 	}
 
