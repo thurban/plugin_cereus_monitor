@@ -17,8 +17,9 @@
  |   cacti-db.sql   — full mysqldump of the Cacti database (if enabled)    |
  |   cacti/         — the Cacti application tree (if enabled), minus rra,  |
  |                    log and cache which are volatile or stored separately |
- |   system-config/ — Apache or nginx config, PHP ini/FPM pools, spine.conf, |
- |                    cron entries, systemd units and a restore manifest    |
+ |   system-config/ — Apache or nginx config, PHP ini/FPM pools, MySQL or   |
+ |                    MariaDB config, spine.conf, cron entries, systemd     |
+ |                    units and a restore manifest                          |
  |                                                                         |
  | Filename format:                                                         |
  |   cacti-rrd-{hostname}-v{version}-{YYYYMMDD}-{HHmmss}.tar.gz            |
@@ -34,7 +35,7 @@
  |   0 3 * * * /usr/bin/php \                                              |
  |     /var/www/html/cacti/plugins/cereus_monitor/cereus_backup.php        |
  |                                                                         |
- | Collecting system config (webserver, cron, spine) needs read access to  |
+ | Collecting system config (webserver, database, cron, spine) needs read    |
  | /etc and /var/spool/cron — run as root for a complete archive. When run |
  | as a non-privileged user the unreadable parts are logged and skipped;   |
  | the backup itself still succeeds.                                       |
@@ -179,7 +180,7 @@ if ($include_db) {
 }
 
 // ---------------------------------------------------------------------------
-// System configuration (webserver, PHP, spine, cron, systemd)
+// System configuration (webserver, PHP, database, spine, cron, systemd)
 //
 // Collected from the live filesystem into a staging directory — these files
 // are small and static, so there is nothing to gain from snapshotting them.
@@ -274,8 +275,25 @@ $elapsed = round(microtime(true) - $t_start, 1);
 
 if ($exit_code === 0 && file_exists($archive_path)) {
 	// The archive holds include/config.php, spine.conf and a full database
-	// dump — all of which contain credentials. Keep it owner-readable only.
-	@chmod($archive_path, 0600);
+	// dump — all of which contain credentials. Keep it away from other local
+	// users, but readable by the webserver group so the Backups page can serve
+	// it. The destination directory's group is the webserver in a normal
+	// install, which is why it is used as the reference here.
+	@chmod($archive_path, 0640);
+
+	$dest_group = @filegroup($dest_dir);
+	if ($dest_group !== false) {
+		@chgrp($archive_path, $dest_group);
+	}
+
+	clearstatcache(true, $archive_path);
+	cereus_backup_log(sprintf('Archive permissions: %s %s',
+		substr(sprintf('%o', fileperms($archive_path)), -4),
+		cereus_backup_owner($archive_path)));
+
+	if (!is_readable($archive_path)) {
+		cereus_backup_log('WARNING: Archive is not readable by the user running this script.');
+	}
 
 	$size_mb = round(filesize($archive_path) / 1048576, 1);
 
@@ -409,7 +427,7 @@ function cereus_backup_find_mysqldump() {
  * Archive layout:
  *   rra/           — RRD data files
  *   cacti/         — Cacti application tree (if enabled)
- *   system-config/ — webserver / PHP / spine / cron configuration (if enabled)
+ *   system-config/ — webserver / PHP / database / spine / cron config (if enabled)
  *   cacti-db.sql   — database dump (if $db_dump_path is provided)
  */
 function cereus_backup_tar($sources, $archive_path, $db_dump_path = null) {
@@ -573,8 +591,8 @@ function cereus_backup_lvm_cleanup($snap_dev, $snap_mount) {
 // ===========================================================================
 
 /**
- * Collect webserver, PHP, spine, cron and systemd configuration into a
- * staging directory. Returns the staging directory (whose single child is
+ * Collect webserver, PHP, database, spine, cron and systemd configuration
+ * into a staging directory. Returns the staging directory (whose single child is
  * 'system-config'), or null if it could not be created.
  *
  * Inside each category, files keep their absolute path so that a restore is
@@ -591,6 +609,7 @@ function cereus_backup_collect_config() {
 
 	cereus_backup_collect_webserver($root);
 	cereus_backup_collect_php($root);
+	cereus_backup_collect_dbconfig($root);
 	cereus_backup_collect_spine($root);
 	cereus_backup_collect_cron($root);
 	cereus_backup_collect_systemd($root);
@@ -682,6 +701,79 @@ function cereus_backup_collect_php($root) {
 	}
 
 	cereus_backup_log("Config: collected $staged PHP configuration path(s).");
+}
+
+/**
+ * MySQL / MariaDB server configuration. Collects the RHEL layout (/etc/my.cnf
+ * plus /etc/my.cnf.d) and the Debian layout (/etc/mysql) when either is
+ * present, so an archive restores onto whichever distribution it came from.
+ *
+ * A tuned database server frequently carries settings that appear in no
+ * config file at all, so the effective variables are recorded alongside.
+ */
+function cereus_backup_collect_dbconfig($root) {
+	$paths = array(
+		'/etc/my.cnf',
+		'/etc/my.cnf.d',
+		'/etc/mysql',
+		'/usr/local/mysql/etc/my.cnf',
+		'/usr/local/etc/my.cnf',
+		'/opt/homebrew/etc/my.cnf',
+	);
+
+	$staged = 0;
+
+	foreach ($paths as $path) {
+		if (cereus_backup_stage($root, 'dbconfig', $path)) {
+			$staged++;
+		}
+	}
+
+	cereus_backup_write_db_variables($root . '/dbconfig');
+
+	if ($staged === 0) {
+		cereus_backup_log("Config: no MySQL/MariaDB configuration files found — the server may be remote.");
+	} else {
+		cereus_backup_log("Config: collected $staged database configuration path(s).");
+	}
+}
+
+/**
+ * Record the server's effective global variables. This is what allows a
+ * restored server to be tuned back to the original, including settings that
+ * were applied at runtime and never written to my.cnf.
+ */
+function cereus_backup_write_db_variables($dir) {
+	if (!is_dir($dir) && !@mkdir($dir, 0700, true)) {
+		cereus_backup_log("WARNING: Cannot create $dir for database variables.");
+		return;
+	}
+
+	$vars = db_fetch_assoc('SHOW GLOBAL VARIABLES');
+
+	if (!cacti_sizeof($vars)) {
+		cereus_backup_log("WARNING: Could not read global database variables.");
+		return;
+	}
+
+	$lines = array(
+		'# Effective MySQL/MariaDB global variables at backup time',
+		'# Server:    ' . db_fetch_cell('SELECT VERSION()'),
+		'# Generated: ' . date('Y-m-d H:i:s'),
+		'#',
+		'# Reference only — restoring these belongs in my.cnf, not SET GLOBAL.',
+		'',
+	);
+
+	foreach ($vars as $var) {
+		$lines[] = $var['Variable_name'] . ' = ' . $var['Value'];
+	}
+
+	if (@file_put_contents($dir . '/global-variables.txt', implode(PHP_EOL, $lines) . PHP_EOL) === false) {
+		cereus_backup_log("WARNING: Could not write database variable dump.");
+	} else {
+		cereus_backup_log("Config: recorded " . cacti_sizeof($vars) . " database global variables.");
+	}
 }
 
 /**
@@ -849,6 +941,7 @@ function cereus_backup_write_manifest($root) {
 	$lines[] = '  cacti/         Cacti application tree — restore to ' . $app_dir;
 	$lines[] = '  cacti-db.sql   mysqldump — restore with: mysql cacti < cacti-db.sql';
 	$lines[] = '  system-config/ OS configuration, mirrored under its original absolute path';
+	$lines[] = '                 includes dbconfig/global-variables.txt for server tuning';
 	$lines[] = '';
 	$lines[] = 'After restoring, fix ownership and SELinux labels, e.g.:';
 	$lines[] = '  chown -R ' . cereus_backup_owner($app_dir) . ' ' . $app_dir;
