@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `system-config/manifest.txt` restore manifest recording OS release, kernel,
   SELinux mode, Cacti/PHP/database/RRDtool/Spine/webserver versions, PHP
   extensions, directory ownership, poller type and the installed plugin list.
+- The MySQL/MariaDB server configuration is collected as
+  `system-config/dbconfig/`, covering both the `/etc/my.cnf` + `/etc/my.cnf.d`
+  layout and the Debian `/etc/mysql` layout, together with a
+  `global-variables.txt` record of the server's effective settings.
 - New settings: *Include Cacti Directory*, *Cacti Directory Exclusions* and
   *Include System Configuration* (Console → Settings → Monitor).
 
@@ -38,11 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads it. This previously produced a non-zero exit and deleted an otherwise
   valid archive.
 
+- Archives created with mode `0600` could not be served by the Backups page,
+  which failed with "File not found or not readable" because the webserver
+  could not read a root-owned archive.
+
 ### Security
 
-- Backup archives are now created with mode `0600`. They contain database
-  credentials in `include/config.php` and `spine.conf`, plus password hashes,
-  SNMP communities and plugin tokens in the database dump.
+- Backup archives are now created with mode `0640`, owned by the destination
+  directory's group so the webserver can serve them while other local users
+  cannot read them. They contain database credentials in `include/config.php`
+  and `spine.conf`, plus password hashes, SNMP communities and plugin tokens in
+  the database dump.
 
 ## [1.0.0]
 
