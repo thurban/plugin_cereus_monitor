@@ -287,6 +287,26 @@ function cereus_monitor_config_settings() {
 			'method'        => 'checkbox',
 			'default'       => 'on',
 		),
+		'cereus_monitor_backup_include_app' => array(
+			'friendly_name' => __('Include Cacti Directory', 'cereus_monitor'),
+			'description'   => __('Archive the Cacti installation directory (code, plugins, custom scripts, include/config.php) as cacti/ inside the archive. RRD files are archived separately as rra/ and are not duplicated.', 'cereus_monitor'),
+			'method'        => 'checkbox',
+			'default'       => 'on',
+		),
+		'cereus_monitor_backup_app_excludes' => array(
+			'friendly_name' => __('Cacti Directory Exclusions', 'cereus_monitor'),
+			'description'   => __('Comma-separated paths, relative to the Cacti directory, to leave out of the archive. Removing rra from this list would store the RRD files twice.', 'cereus_monitor'),
+			'method'        => 'textbox',
+			'default'       => 'rra,log,cache,.git,.claude,.omc,.worktrees',
+			'max_length'    => 512,
+			'size'          => 60,
+		),
+		'cereus_monitor_backup_include_config' => array(
+			'friendly_name' => __('Include System Configuration', 'cereus_monitor'),
+			'description'   => __('Archive the Apache or nginx configuration, PHP ini and FPM pools, spine.conf, cron entries, matching systemd units and a restore manifest as system-config/. Requires running the backup as root to read /etc and /var/spool/cron; anything unreadable is skipped with a warning.', 'cereus_monitor'),
+			'method'        => 'checkbox',
+			'default'       => 'on',
+		),
 		'cereus_monitor_backup_mysqldump_path' => array(
 			'friendly_name' => __('Path to mysqldump (optional)', 'cereus_monitor'),
 			'description'   => __('Full path to the mysqldump binary. Leave empty to auto-detect from common paths or $PATH.', 'cereus_monitor'),
